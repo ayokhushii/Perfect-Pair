@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PERFECT PAIR</title>
+    <style>
+        body {
+            background: #000;
+            color: #fff;
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 0;
+            padding: 10px;
+        }
+
+        h1 {
+            font-size: 18px;
+            letter-spacing: 4px;
+            margin-bottom: 20px;
+            font-weight: 300;
+        }
+
+        .camera-container {
+            position: relative;
+            width: 100%;
+            max-width: 500px;
+            border: 1px solid #222;
+            background: #000;
+        }
+
+        video { display: none; }
+        canvas { width: 100%; display: block; }
+
+        .controls {
+            width: 100%;
+            max-width: 500px;
+            padding: 20px;
+            box-sizing: border-box;
+            background: #111;
+        }
+
+        .slider-box {
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        input[type=range] {
+            width: 100%;
+            cursor: pointer;
+            accent-color: #fff;
+        }
+
+        .buttons {
+            display: flex;
+            gap: 10px;
+        }
+
+        button {
+            flex: 1;
+            padding: 12px;
+            background: #000;
+            color: #fff;
+            border: 1px solid #fff;
+            text-transform: uppercase;
+            font-size: 11px;
+            cursor: pointer;
+        }
+
+        button:active { background: #fff; color: #000; }
+        #recBtn.active { background: #ff0000; border-color: #ff0000; }
+
+        #previews {
+            margin-top: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+            width: 100%;
+        }
+
+        #previews img, #previews video {
+            max-width: 100%;
+            width: 400px;
+            border: 1px solid #333;
+        }
+
+        .download-btn {
+            color: #fff;
+            text-decoration: none;
+            font-size: 11px;
+            border: 1px solid #fff;
+            padding: 10px 20px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>PERFECT PAIR</h1>
+
+    <div class="camera-container">
+        <video id="v" autoplay playsinline></video>
+        <canvas id="c"></canvas>
+    </div>
+
+    <div class="controls">
+        <div class="slider-box">
+            <label style="font-size: 9px; letter-spacing: 2px;">INK SENSITIVITY</label><br>
+            <input type="range" id="threshold" min="40" max="220" value="125">
+        </div>
+        <div class="buttons">
+            <button id="switch">Flip Cam</button>
+            <button id="snap">Photo</button>
+            <button id="recBtn">Record</button>
+        </div>
+    </div>
+
+    <div id="previews">
+        <img id="pImg" style="display:none;">
+        <video id="pVid" controls style="display:none;"></video>
+        <a id="dl" class="download-btn" style="display:none;">DOWNLOAD FILE</a>
+    </div>
+
+    <script>
+        const v = document.getElementById('v');
+        const c = document.getElementById('c');
+        const ctx = c.getContext('2d', {willReadFrequently: true});
+        const thresholdInput = document.getElementById('threshold');
+        
+        let stream, recorder, chunks = [];
+        let mode = 'user';
+
+        async function start() {
+            if (stream) stream.getTracks().forEach(t => t.stop());
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: mode }, audio: false 
+                });
+                v.srcObject = stream;
+            } catch (e) { alert("Camera error"); }
+        }
+
+        function render() {
+            if (v.paused || v.ended) return;
+            if (c.width !== v.videoWidth) {
+                c.width = v.videoWidth;
+                c.height = v.videoHeight;
+            }
+
+            ctx.save();
+            ctx.scale(-1, 1);
+            ctx.filter = "brightness(1.3) contrast(1.5) saturate(0.8)";
+            ctx.drawImage(v, -c.width, 0, c.width, c.height);
+            
+            ctx.globalAlpha = 0.4;
+            ctx.globalCompositeOperation = "screen";
+            ctx.filter = "blur(8px) brightness(1.5)";
+            ctx.drawImage(v, -c.width, 0, c.width, c.height);
+            
+            ctx.globalAlpha = 0.2;
+            ctx.fillStyle = "#ffffff";
+            ctx.fillRect(-c.width, 0, c.width, c.height);
+
+            ctx.globalCompositeOperation = "source-over";
+            ctx.globalAlpha = 1.0;
+            ctx.restore();
+
+            const boxSize = Math.min(c.width, c.height) * 0.45;
+            const startX = (c.width - boxSize) / 2;
+            const startY = (c.height - boxSize) / 2;
+
+            const imgData = ctx.getImageData(startX, startY, boxSize, boxSize);
+            const data = imgData.data;
+            const threshold = parseInt(thresholdInput.value);
+
+            for (let i = 0; i < data.length; i += 4) {
+                const r = data[i], g = data[i+1], b = data[i+2];
+                const lum = (r * 0.299 + g * 0.587 + b * 0.114);
+                let noise = (Math.random() - 0.5) * 20; 
+                const result = (lum + noise) > threshold ? 255 : 0;
+                data[i] = data[i+1] = data[i+2] = result;
+                data[i+3] = 255; 
+            }
+
+            ctx.filter = "none";
+            ctx.putImageData(imgData, startX, startY);
+
+            ctx.strokeStyle = "rgba(255,255,255,0.5)";
+            ctx.strokeRect(startX, startY, boxSize, boxSize);
+
+            requestAnimationFrame(render);
+        }
+
+        v.onplay = () => requestAnimationFrame(render);
+
+        document.getElementById('switch').onclick = () => {
+            mode = (mode === 'user') ? 'environment' : 'user';
+            start();
+        };
+
+        document.getElementById('snap').onclick = () => {
+            const url = c.toDataURL('image/png');
+            document.getElementById('pImg').src = url;
+            document.getElementById('pImg').style.display = 'block';
+            document.getElementById('pVid').style.display = 'none';
+            showDL(url, 'perfect-pair-snap.png');
+        };
+
+        document.getElementById('recBtn').onclick = function() {
+            if (recorder && recorder.state === 'recording') {
+                recorder.stop();
+                this.innerText = "Record";
+                this.classList.remove('active');
+            } else {
+                chunks = [];
+                recorder = new MediaRecorder(c.captureStream(30));
+                recorder.ondataavailable = e => chunks.push(e.data);
+                recorder.onstop = () => {
+                    const url = URL.createObjectURL(new Blob(chunks, {type: 'video/webm'}));
+                    document.getElementById('pVid').src = url;
+                    document.getElementById('pVid').style.display = 'block';
+                    document.getElementById('pImg').style.display = 'none';
+                    showDL(url, 'perfect-pair-video.webm');
+                };
+                recorder.start();
+                this.innerText = "Stop";
+                this.classList.add('active');
+            }
+        };
+
+        function showDL(url, name) {
+            const dl = document.getElementById('dl');
+            dl.href = url;
+            dl.download = name;
+            dl.style.display = 'inline-block';
+        }
+
+        start();
+    </script>
+</body>
+</html>
